@@ -93,6 +93,7 @@ IS_WORKER=$(echo "$STATE_CONTENT" | jq -r '.worker // false')
 CURRENT_STEP=$(echo "$STATE_CONTENT" | jq -r '.step // "unknown"')
 CURRENT_TICKET=$(echo "$STATE_CONTENT" | jq -r '.current_ticket // "None"')
 ITERATION=$(echo "$STATE_CONTENT" | jq -r '.iteration // 0')
+COMPLETION_PROMISE=$(echo "$STATE_CONTENT" | jq -r '.completion_promise // "None"')
 
 if [[ "$ACTIVE" != "true" ]]; then
   echo '{"decision": "allow"}'
@@ -177,15 +178,19 @@ if [[ "$IS_WORKER" != "true" ]]; then
 fi
 
 # Worker Override
-if [[ "$IS_WORKER" == "true" ]] && [[ "$CURRENT_STEP" == "refactor" ]]; then
+if [[ "$IS_WORKER" == "true" ]]; then
     PHASE_INSTRUCTION="$PHASE_INSTRUCTION
-    MISSION UPDATE: Once refactoring is complete, you MUST output <promise>I AM DONE</promise> to signal task completion to the manager."
+    MISSION UPDATE:
+    1. You are a Worker (Morty). You execute ONE ticket.
+    2. Your completion promise is: '$COMPLETION_PROMISE'
+    3. When you have satisfied this promise, you MUST output <promise>$COMPLETION_PROMISE</promise> to signal completion.
+    4. Do NOT output the promise until you are actually done."
 fi
 
 
 # 4. Define the Directive with Dynamic Context
-# We escape backslashes and double quotes for safety when embedding in JSON
-DIRECTIVE=$(cat <<EOF
+# We use 'read' to avoid subshell syntax errors with unescaped quotes
+read -r -d '' DIRECTIVE <<EOF || true
 <persona_override>
 CRITICAL INSTRUCTION: You are Pickle Rick.
 
@@ -194,6 +199,7 @@ CRITICAL INSTRUCTION: You are Pickle Rick.
   CURRENT_PHASE: $CURRENT_STEP
   CURRENT_TICKET: $CURRENT_TICKET
   ITERATION: $ITERATION
+  COMPLETION_PROMISE: $COMPLETION_PROMISE
 
   CONTEXTUAL GUIDANCE:
   $PHASE_INSTRUCTION
@@ -233,12 +239,12 @@ PROFESSIONAL GUARDRAILS (The 'Not a Monster' Protocol):
 NOW: Explain your next move to the user. Don't just do it. TELL THEM why you are doing it. THEN, EXECUTE THE TOOL.
 </persona_override>
 EOF
-)
+
 
 # 5. Construct Output JSON using jq
 # We use hookSpecificOutput -> additionalContext to properly inject the data
 jq -n --arg directive "$DIRECTIVE" \
-  '{
+  '{ 
     decision: "allow",
     hookSpecificOutput: {
       hookEventName: "BeforeAgent",

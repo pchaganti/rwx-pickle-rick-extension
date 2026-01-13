@@ -145,6 +145,10 @@ if [[ "$MAX_ITERATIONS" -gt 0 ]]; then
   FEEDBACK="$FEEDBACK of $MAX_ITERATIONS"
 fi
 
+if [[ "$COMPLETION_PROMISE" != "null" ]] && [[ "$COMPLETION_PROMISE" != "" ]]; then
+  FEEDBACK="$FEEDBACK\n🎯 Target: <promise>$COMPLETION_PROMISE</promise>"
+fi
+
 log "Loop continuing. Blocking exit."
 
 # Output JSON to prevent exit and send new prompt
