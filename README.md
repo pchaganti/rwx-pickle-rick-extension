@@ -117,7 +117,7 @@ If a session was interrupted or started via `/pickle-prd`, resume it using:
 ```bash
 /pickle --resume
 ```
-*Note: This resumes the session pointed to by `current_session_path`.*
+*Note: This resumes the active session for your current working directory.*
 
 ### ⚙️ Important Configuration
 

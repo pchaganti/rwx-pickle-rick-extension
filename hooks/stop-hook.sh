@@ -28,8 +28,8 @@ fi
 # 2. Determine State File Path
 STATE_FILE="${PICKLE_STATE_FILE:-}"
 if [[ -z "$STATE_FILE" ]]; then
-  if [[ -f "$CURRENT_SESSION_POINTER" ]]; then
-    SESSION_DIR=$(cat "$CURRENT_SESSION_POINTER")
+  SESSION_DIR=$("$EXTENSION_DIR/scripts/get_session.sh" "$PWD" 2>/dev/null || true)
+  if [[ -n "$SESSION_DIR" ]]; then
     STATE_FILE="$SESSION_DIR/state.json"
   else
     # Fallback (or no session active)

@@ -41,7 +41,10 @@ Use this when you have a vague bug report.
 ### 1. Monitoring Progress
 You can watch Pickle Rick's "thoughts" in real-time by tailing the state file in your session directory:
 ```bash
-tail -f ~/.gemini/extensions/pickle-rick/current_session_path | xargs -I {} tail -f {}/state.json
+# Get the current session directory for your project
+SESSION_DIR=$(~/.gemini/extensions/pickle-rick/scripts/get_session.sh)
+# Watch the state
+tail -f "$SESSION_DIR/state.json"
 ```
 
 ### 2. Manual Intervention

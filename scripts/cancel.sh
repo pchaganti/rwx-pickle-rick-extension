@@ -6,14 +6,13 @@
 set -euo pipefail
 
 EXTENSION_DIR="$HOME/.gemini/extensions/pickle-rick"
-CURRENT_SESSION_POINTER="$EXTENSION_DIR/current_session_path"
+SESSION_DIR=$("$EXTENSION_DIR/scripts/get_session.sh" "$PWD" 2>/dev/null || true)
 
-if [[ ! -f "$CURRENT_SESSION_POINTER" ]]; then
-  echo "❌ No active session found (pointer missing)" >&2
+if [[ -z "$SESSION_DIR" ]]; then
+  echo "❌ No active session found for current directory ($PWD)" >&2
   exit 1
 fi
 
-SESSION_DIR=$(cat "$CURRENT_SESSION_POINTER")
 STATE_FILE="$SESSION_DIR/state.json"
 
 if [[ ! -f "$STATE_FILE" ]]; then

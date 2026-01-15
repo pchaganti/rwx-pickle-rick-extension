@@ -26,6 +26,7 @@ bash "${extensionPath}/scripts/setup.sh" $ARGUMENTS
 - `--worker-timeout <SECONDS>`: Timeout for worker tasks.
 - `--completion-promise <TEXT>`: A text token that must be output to finish.
 - `--resume [PATH]`: Resume a previous session.
+- `--reset`: Reset the iteration count and timer (only valid with --resume).
 
 **CRITICAL**: Pass the user's arguments **VERBATIM** to the script. Do not rename, reorder, or infer flags. If the user provides `--max-time`, pass `--max-time`.
 

@@ -11,22 +11,36 @@ set -euo pipefail
 # -- Configuration --
 ROOT_DIR="$HOME/.gemini/extensions/pickle-rick"
 SESSIONS_ROOT="$ROOT_DIR/sessions"
-LATEST_LINK="$ROOT_DIR/current_session_path"
+SESSIONS_MAP="$ROOT_DIR/current_sessions.json"
 
 # -- State Variables --
-LOOP_LIMIT=3
-TIME_LIMIT=60
+LOOP_LIMIT=""
+TIME_LIMIT=""
+LOOP_LIMIT_SET="false"
+TIME_LIMIT_SET="false"
 WORKER_TIMEOUT=1200
 PROMISE_TOKEN="null"
 TASK_ARGS=()
 RESUME_MODE="false"
 RESUME_PATH=""
+RESET_MODE="false"
+START_EPOCH=$(date +%s)
 
 # -- Helpers --
 
 die() {
   echo "❌ Error: $1" >&2
   exit 1
+}
+
+update_session_map() {
+  local cwd="$1"
+  local path="$2"
+  if [[ ! -f "$SESSIONS_MAP" ]]; then echo "{}" > "$SESSIONS_MAP"; fi
+  local tmp_map=$(mktemp)
+  if jq --arg cwd "$cwd" --arg path "$path" '.[$cwd] = $path' "$SESSIONS_MAP" > "$tmp_map"; then
+    mv "$tmp_map" "$SESSIONS_MAP"
+  fi
 }
 
 # -- Argument Parser --
@@ -41,14 +55,15 @@ fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --max-iterations)
-
       [[ "${2:-}" =~ ^[0-9]+$ ]] || die "Invalid iteration limit: '${2:-}'"
       LOOP_LIMIT="$2"
+      LOOP_LIMIT_SET="true"
       shift 2
       ;;
     --max-time)
       [[ "${2:-}" =~ ^[0-9]+$ ]] || die "Invalid time limit: '${2:-}'"
       TIME_LIMIT="$2"
+      TIME_LIMIT_SET="true"
       shift 2
       ;;
     --worker-timeout)
@@ -70,13 +85,21 @@ while [[ $# -gt 0 ]]; do
         shift 1
       fi
       ;;
+    --reset)
+      RESET_MODE="true"
+      shift 1
+      ;;
+    --paused)
+      PAUSED_MODE="true"
+      shift 1
+      ;;
     *)
       TASK_ARGS+=("$1")
       shift
       ;;
   esac
 done
-TASK_STR="${TASK_ARGS[*]}"
+TASK_STR="${TASK_ARGS[*]:-}"
 
 # -- Session Setup --
 
@@ -84,10 +107,13 @@ if [[ "$RESUME_MODE" == "true" ]]; then
   # 1. Resolve Path
   if [[ -n "$RESUME_PATH" ]]; then
     FULL_SESSION_PATH="$RESUME_PATH"
-  elif [[ -f "$LATEST_LINK" ]]; then
-    FULL_SESSION_PATH=$(cat "$LATEST_LINK")
+  elif [[ -f "$SESSIONS_MAP" ]]; then
+    FULL_SESSION_PATH=$(jq -r --arg cwd "$PWD" '.[$cwd] // empty' "$SESSIONS_MAP")
+    if [[ -z "$FULL_SESSION_PATH" ]]; then
+        die "No active session found for current directory ($PWD)."
+    fi
   else
-    die "No active session to resume. Provide a path or run a new task."
+    die "No active sessions found (and no path provided)."
   fi
 
   # 2. Validate
@@ -95,13 +121,44 @@ if [[ "$RESUME_MODE" == "true" ]]; then
   STATE_PATH="$FULL_SESSION_PATH/state.json"
   [[ -f "$STATE_PATH" ]] || die "State file not found in: $FULL_SESSION_PATH"
 
-  # 3. Load State (for display only)
-  # We do NOT overwrite the state file in resume mode
-  echo "$FULL_SESSION_PATH" > "$LATEST_LINK"
+  # 3. Reactivate Session & Update Limits
+  JQ_CMD=".active = true"
+  
+  if [[ "$LOOP_LIMIT_SET" == "true" ]]; then
+     JQ_CMD="$JQ_CMD | .max_iterations = $LOOP_LIMIT"
+  fi
+  if [[ "$TIME_LIMIT_SET" == "true" ]]; then
+     JQ_CMD="$JQ_CMD | .max_time_minutes = $TIME_LIMIT"
+  fi
+  if [[ "$RESET_MODE" == "true" ]]; then
+     JQ_CMD="$JQ_CMD | .iteration = 1 | .start_time_epoch = $START_EPOCH"
+  fi
+
+  TMP_STATE=$(mktemp)
+  if jq "$JQ_CMD" "$STATE_PATH" > "$TMP_STATE"; then
+      mv "$TMP_STATE" "$STATE_PATH"
+  else
+      die "Failed to update state file."
+  fi
+
+  # 4. Refresh config from state for display
+  # This ensures we show the *actual* current state
+  STATE_CONTENT=$(cat "$STATE_PATH")
+  LOOP_LIMIT=$(echo "$STATE_CONTENT" | jq -r '.max_iterations')
+  TIME_LIMIT=$(echo "$STATE_CONTENT" | jq -r '.max_time_minutes')
+  CURRENT_ITERATION=$(echo "$STATE_CONTENT" | jq -r '.iteration')
+  PROMISE_TOKEN=$(echo "$STATE_CONTENT" | jq -r '.completion_promise // "null"')
+
+  update_session_map "$PWD" "$FULL_SESSION_PATH"
 
 else
   # -- New Session Logic --
   [[ -n "$TASK_STR" ]] || die "No task specified. Run /pickle --help for usage."
+
+  # Apply Defaults if not set
+  [[ -z "$LOOP_LIMIT" ]] && LOOP_LIMIT=3
+  [[ -z "$TIME_LIMIT" ]] && TIME_LIMIT=60
+  CURRENT_ITERATION=1
 
   TODAY=$(date +%Y-%m-%d)
   # Generate a random 8-char hash (4 bytes hex)
@@ -112,7 +169,7 @@ else
   STATE_PATH="$FULL_SESSION_PATH/state.json"
 
   mkdir -p "$FULL_SESSION_PATH"
-  echo "$FULL_SESSION_PATH" > "$LATEST_LINK"
+  update_session_map "$PWD" "$FULL_SESSION_PATH"
 
   # -- JSON Generation --
 
@@ -120,11 +177,14 @@ else
   JSON_SAFE_PROMPT=$(echo "$TASK_STR" | sed 's/"/\\"/g')
   JSON_SAFE_PROMISE=$( [[ "$PROMISE_TOKEN" == "null" ]] && echo "null" || echo "\"$PROMISE_TOKEN\"" )
   TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  START_EPOCH=$(date +%s)
+  
+  # Determine initial active state
+  INITIAL_ACTIVE="true"
+  [[ "${PAUSED_MODE:-false}" == "true" ]] && INITIAL_ACTIVE="false"
 
   cat > "$STATE_PATH" <<JSON
 {
-  "active": true,
+  "active": $INITIAL_ACTIVE,
   "working_dir": "$PWD",
   "step": "prd",
   "iteration": 1,
@@ -149,7 +209,7 @@ cat <<EOF
 🥒 Pickle Rick Activated!
 
 >> Loop Config:
-   Iteration: 1
+   Iteration: $CURRENT_ITERATION
    Limit:     $( [[ $LOOP_LIMIT -gt 0 ]] && echo "$LOOP_LIMIT" || echo "∞" )
    Max Time:  ${TIME_LIMIT}m
    Worker TO: ${WORKER_TIMEOUT}s
